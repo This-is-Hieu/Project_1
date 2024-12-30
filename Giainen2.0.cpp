@@ -18,14 +18,25 @@ set<char> alphabet = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'
 set<char> Alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
 set<char> number = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
 int length = 0;                     //Số kí tự trong mật khẩu
-const char *zip_filename = "D:/OneDrive/Desktop/123.zip";
-const char *file_name_in_zip = "123.txt";
-
+long long total;
+string filedir;
+string filename;
+const char *zip_filename;
+const char *file_name;
 
 void Generate(string &pass, int cur_length){
     if (cur_length == length) {
-        while(List.size() > 5000) {
-            this_thread::sleep_for(chrono::milliseconds(50));
+        while(List.size() > 20000) {
+            int width = 100;
+            cout << "\r[";
+            int pos = tried * width / total;
+            for (int j = 0; j < width; ++j) {
+            if (j < pos) cout << "=";
+            else if (j == pos) cout << ">";
+            else cout << " ";
+        }
+        cout << "] " << tried*100/total << "%" <<flush;
+            this_thread::sleep_for(chrono::milliseconds(200));
             day++;
         }
         mtx.lock();
@@ -37,17 +48,12 @@ void Generate(string &pass, int cur_length){
         pass[cur_length] = c;
         Generate(pass, cur_length +1);
     }
-
 }
 
-void Test(const char *zip_filename, const char *file_name_in_zip) {
+void Test(const char *zip_filename, const char *file_name) {
     int err = 0;
     zip_t *archive = zip_open(zip_filename, 0, &err);
-    if (!archive) {
-        cout << "Khong the mo file zip  " << err << "\n";
-        return;
-    }
-    string pass ;
+    string pass;
     while(!Found){
         mtx.lock();
         if(!List.empty()){
@@ -59,11 +65,15 @@ void Test(const char *zip_filename, const char *file_name_in_zip) {
         else{
             het++;
             mtx.unlock();
-            continue;
+            if(tried == total) {
+                return;
+            }
+            this_thread::sleep_for(chrono::milliseconds(50));
         }
-            zip_file_t *file = zip_fopen_encrypted(archive, file_name_in_zip, 0, pass.c_str());
+            zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, pass.c_str());
+
             if(file){
-                char buffer[1024];
+                char buffer[16];
                 int bytes_read = zip_fread(file, buffer, sizeof(buffer));
                 if (bytes_read > 0) {
                     cout << "Mat khau dung la " << pass << "\n";
@@ -87,6 +97,49 @@ void createCharList();
 void input(int &num_thread) {
     string tmp;
     bool flag;
+    int err = 0;
+    zip_t *archive;
+
+    cout << "Nhap vao duong dan" << endl;
+    do {
+        cin >> filedir;
+        zip_filename = filedir.c_str();
+        archive = zip_open(zip_filename, 0, &err);
+        if (!archive) {
+            cout << "Khong tim thay duong dan Error " << err << endl;
+            cout << "Hay nhap lai duong dan" << endl;
+        }
+    } while (!archive);
+
+    zip_int64_t num_entries = zip_get_num_entries(archive, 0);
+    if (num_entries < 0) {
+        cout << "Khong the lay danh sach file trong ZIP Error " << num_entries << endl;
+        zip_close(archive);
+        return;
+    }
+
+    cout << "Danh sach cac file trong ZIP:" << endl;
+    for (zip_uint64_t i = 0; i < num_entries; i++) {
+        file_name = zip_get_name(archive, i, 0);
+        if (file_name) {
+            cout << i + 1 << ": " << file_name << endl;
+        } else {
+            cout << "Khong the lay ten file tai vi tri " << i << endl;
+        }
+    }
+
+    cout << "Chon file trong ZIP bang cach nhap so thu tu: " << endl;
+    int choice;
+    do {
+        cin >> choice;
+        if (choice < 1 || choice > num_entries) {
+            cout << "Lua chon khong hop le. Vui long nhap lai: ";
+        }
+    } while (choice < 1 || choice > num_entries);
+    filename = zip_get_name(archive, choice - 1, 0);
+    file_name = filename.c_str();
+    cout << "Ban da chon file: " << file_name << endl;
+    zip_close(archive);
 
     cout << "Nhap vao so luong" << endl;
     do {
@@ -163,30 +216,6 @@ void createCharList(){
     return;
 }
 
-void progress_bar() {
-    long long total = pow(charList.size(),length);
-    int width = 100;
-    cout << "So mat khau can xu li: " << total <<endl;
-    cout << "Cac ky tu se su dung" << endl;
-    for(char c : charList){
-        cout << c << " ";
-    }
-    cout << endl;
-    while(!Found && (tried!=total)){
-        cout << "\r[";
-        int pos = tried *width / total;
-        for (int j = 0; j < width; ++j) {
-            if (j < pos) cout << "=";
-            else if (j == pos) cout << ">";
-            else cout << "-";
-        }
-        cout << "] " << tried*100/total << "%" <<flush;
-        this_thread::sleep_for(chrono::milliseconds(200));
-    }
-
-    cout << endl;
-    return;
-}
 
 int main(){
     int num_thread;
@@ -194,17 +223,19 @@ int main(){
     input(num_thread);
 
     string pass(length, ' ');
-    thread generator(Generate, ref(pass), 0);
-    for(int i=0; i < num_thread; i++){
-        testers.push_back(thread(Test, zip_filename, file_name_in_zip));
-    }
-    progress_bar();
+    total = pow(charList.size(),length);
 
-    generator.join();
+    for(int i=0; i < num_thread; i++){
+        testers.push_back(thread(Test, zip_filename, file_name));
+    }
+    Generate( pass, 0);
+    if((tried == total) && (!Found)) {
+        cout << endl;
+        cout << "Khong tim thay mat khau dung" << endl;
+    }
     for (auto &t : testers) {
         t.join();
     }
-
     cout << endl;
     cout << "Danh sach mat khau gay loi CRC" << endl;
     while (!ErrPass.empty()) {
