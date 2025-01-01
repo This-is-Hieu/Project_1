@@ -5,12 +5,10 @@
 using namespace std;
 
 deque<string> List;                 //Deque chứa các mật khẩu để thử
-atomic<bool> Full = false;          //Khóa kiểm tra khi deque đầy
 atomic<bool> Found = false;         //Khóa kiểm tra khi tìm thấy kết quả
-atomic<bool> Empty = true;          //Khóa kiểm tra khi deque rỗng
-atomic<long long> tried = 0;
+atomic<long long> tried = 0;        //Tính số pass đã thử
 queue<string> ErrPass;              //Queue chứa số mật khẩu gây lỗi
-int day=0;                          //Biến đếm số lần deque đầy
+int day = 0;                        //Biến đếm số lần deque đầy
 int het = 0;                        //Biến đếm số lần deque trống
 mutex mtx;                          //Khóa deque tránh xung đột
 set<char> charList= {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
@@ -19,10 +17,14 @@ set<char> Alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'
 set<char> number = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
 int length = 0;                     //Số kí tự trong mật khẩu
 long long total;
-string filedir;
+string ZipFileDirectory;
 string filename;
 const char *zip_filename;
 const char *file_name;
+int num_thread;
+vector<thread> testers;
+int choice = 0;
+string PasswordFilePath;
 
 void Generate(string &pass, int cur_length){
     if (cur_length == length) {
@@ -31,11 +33,11 @@ void Generate(string &pass, int cur_length){
             cout << "\r[";
             int pos = tried * width / total;
             for (int j = 0; j < width; ++j) {
-            if (j < pos) cout << "=";
-            else if (j == pos) cout << ">";
-            else cout << " ";
-        }
-        cout << "] " << tried*100/total << "%" <<flush;
+                if (j < pos) cout << "=";
+                else if (j == pos) cout << ">";
+                else cout << " ";
+            }
+            cout << "] " << tried*100/total << "%" <<flush;
             this_thread::sleep_for(chrono::milliseconds(200));
             day++;
         }
@@ -48,6 +50,35 @@ void Generate(string &pass, int cur_length){
         pass[cur_length] = c;
         Generate(pass, cur_length +1);
     }
+}
+
+bool isPassFile(const string PasswordFilePath) {
+    ifstream passfile(PasswordFilePath);
+    if (!passfile.is_open()) {
+        return false;
+    }
+    passfile.close();
+    return true;
+}
+
+void passFromFile(const string PasswordFilePath){
+    ifstream passfile(PasswordFilePath);
+    string line;
+    while((!Found) && (getline(passfile, line))){
+        if(!line.empty()){
+            if(List.size() < 20000){
+                mtx.lock();
+                List.push_back(line);
+                mtx.unlock();
+            }
+            else {
+                cout << "So mat khau da thu " << tried << "\n";
+                this_thread::sleep_for(chrono::milliseconds(200));
+                day++;
+            }
+        }
+    }
+    passfile.close();
 }
 
 void Test(const char *zip_filename, const char *file_name) {
@@ -94,7 +125,7 @@ void Test(const char *zip_filename, const char *file_name) {
 
 void createCharList();
 
-void input(int &num_thread) {
+void input() {
     string tmp;
     bool flag;
     int err = 0;
@@ -102,8 +133,8 @@ void input(int &num_thread) {
 
     cout << "Nhap vao duong dan" << endl;
     do {
-        cin >> filedir;
-        zip_filename = filedir.c_str();
+        cin >> ZipFileDirectory;
+        zip_filename = ZipFileDirectory.c_str();
         archive = zip_open(zip_filename, 0, &err);
         if (!archive) {
             cout << "Khong tim thay duong dan Error " << err << endl;
@@ -129,7 +160,6 @@ void input(int &num_thread) {
     }
 
     cout << "Chon file trong ZIP bang cach nhap so thu tu: " << endl;
-    int choice;
     do {
         cin >> choice;
         if (choice < 1 || choice > num_entries) {
@@ -164,30 +194,51 @@ void input(int &num_thread) {
     }
     while((num_thread < 0) || (num_thread >16));
 
-    cout << "Nhap vao so ky tu" << endl;
+    cout <<"Chon cach thuc" << endl;
+    cout <<"1.Bruteforce"<< endl;
+    cout <<"2.Su dung danh sach mat khau" << endl;
     do {
-        cin >> tmp;
-        try {
-        length = stoi(tmp);
-        flag = true;
+        cin >> choice;
+        if((choice != 1) && (choice != 2)) {
+            cout << "Xin chon 1 lua chon khac" << endl;
         }
-        catch (const invalid_argument&) {
-            cout << "Du lieu khong hop le. Vui long nhap lai (0-6): " << endl;
-            length = -1;
-            flag = false;
+    } while((choice != 1) && (choice != 2));
+    if(choice == 1){
+        cout << "Nhap vao so ky tu" << endl;
+        do {
+            cin >> tmp;
+            try {
+            length = stoi(tmp);
+            flag = true;
+            }
+            catch (const invalid_argument&) {
+                cout << "Du lieu khong hop le. Vui long nhap lai (0-6): " << endl;
+                length = -1;
+                flag = false;
+            }
+            catch (const out_of_range&) {
+                cout << "Gia tri qua lon. Vui long nhap lai (0-6): " << endl;
+                length = -1;
+                flag = false;
+            }
+            if (((length < 0) || (length >6)) && (flag == true)) {
+                cout << "Gia tri qua lon. Vui long nhap lai (0-6): " << endl;
+            }
         }
-        catch (const out_of_range&) {
-            cout << "Gia tri qua lon. Vui long nhap lai (0-6): " << endl;
-            length = -1;
-            flag = false;
-        }
-        if (((length < 0) || (length >6)) && (flag == true)) {
-            cout << "Gia tri qua lon. Vui long nhap lai (0-6): " << endl;
+        while((num_thread < 0) || (num_thread >6));
+        createCharList();
+        return;
+    }
+    else if (choice == 2) {
+        cout << "Nhap vao duong dan file chua mat khau" << endl;
+        while (!isPassFile(PasswordFilePath)) {
+            cin >> PasswordFilePath;
+            if(!isPassFile(PasswordFilePath)) {
+                cout << "Khong the mo tep, hay nhap lai " << PasswordFilePath << endl;
+            }
+        return;
         }
     }
-    while((num_thread < 0) || (num_thread >6));
-    createCharList();
-    return;
 }
 
 void createCharList(){
@@ -203,40 +254,24 @@ void createCharList(){
             charList.insert(alphabet.begin(), alphabet.end());
             continue;
         }
-        if(tmp == '2') {
+        else if(tmp == '2') {
             charList.insert(Alphabet.begin(), Alphabet.end());
             continue;
         }
-        if(tmp == '3') {
-            charList.insert(number.begin(), Alphabet.end());
+        else if(tmp == '3') {
+            charList.insert(number.begin(),number.end());
             continue;
         }
-        if(tmp != '0') charList.insert(tmp);
+        else if(tmp != '0') charList.insert(tmp);
     }
     return;
 }
 
-
-int main(){
-    int num_thread;
-    vector<thread> testers;
-    input(num_thread);
-
-    string pass(length, ' ');
-    total = pow(charList.size(),length);
-
-    for(int i=0; i < num_thread; i++){
-        testers.push_back(thread(Test, zip_filename, file_name));
-    }
-    Generate( pass, 0);
-    if((tried == total) && (!Found)) {
-        cout << endl;
+void output(){
+    cout << endl;
+    if(!Found) {
         cout << "Khong tim thay mat khau dung" << endl;
     }
-    for (auto &t : testers) {
-        t.join();
-    }
-    cout << endl;
     cout << "Danh sach mat khau gay loi CRC" << endl;
     while (!ErrPass.empty()) {
         cout << ErrPass.front() << endl;
@@ -246,5 +281,41 @@ int main(){
     cout << endl;
     cout << "So lan het la " << het <<"\n";
     cout << "So lan day la " << day <<"\n";
-    return 0;
+}
+
+void process(){
+    cout << choice << endl;
+    string pass(length, ' ');
+    if(choice == 1) {
+        total = pow(charList.size(),length);
+        cout << "So pass can thu " << total << endl;
+    }
+
+    for(int i=0; i < num_thread; i++){
+        testers.push_back(thread(Test, zip_filename, file_name));
+    }
+
+    if(choice == 1) {
+        cout << "Bat dau bruteforce" << endl;
+        Generate(pass, 0);
+    }
+    else if(choice == 2) {
+        passFromFile(PasswordFilePath);
+    }
+    for (auto &t : testers) {
+        t.join();
+    }
+    return;
+}
+
+int main(){
+    string terminate;
+    while(true) {
+        input();
+        process();
+        output();
+        return 0;
+        getline(cin, terminate);
+        if(terminate.empty()) break;
+    }
 }
