@@ -3,69 +3,77 @@
 #include<zip.h>
 
 using namespace std;
-
-deque<string> List;                 //Deque chứa các mật khẩu để thử
-atomic<bool> Full = false;          //Khóa kiểm tra khi deque đầy
+deque<string> List;
 atomic<bool> Found = false;         //Khóa kiểm tra khi tìm thấy kết quả
-atomic<bool> Empty = true;          //Khóa kiểm tra khi deque rỗng
-atomic<long long> tried = 0;
-queue<string> ErrPass;              //Queue chứa số mật khẩu gây lỗi
-int day=0;                          //Biến đếm số lần deque đầy
-int het = 0;                        //Biến đếm số lần deque trống
-mutex mtx;                          //Khóa deque tránh xung đột
+atomic<long long> Index(0);        //Tính số pass đã thử
+queue<string> Pass;              //Queue chứa số mật khẩu gây lỗi
 set<char> charList= {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
 set<char> alphabet = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
 set<char> Alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
 set<char> number = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+string newCharList;
 int length = 0;                     //Số kí tự trong mật khẩu
-const char *zip_filename = "D:/OneDrive/Desktop/123.zip";
-const char *file_name_in_zip = "123.txt";
+long long total;                    //Tổng số mật khẩu cần thử
+string ZipFileDirectory;
+string filename;
+const char *zip_filename;
+const char *file_name;
+int num_thread;                     //Số luồng
+vector<thread> testers;             //Vector chứa luồng
+int choice = 0;
+string PasswordFilePath;
+int sizeOfList = 0;
+mutex mtx;
+bool theEnd = false;
 
-
-void Generate(string &pass, int cur_length){
-    if (cur_length == length) {
-        while(List.size() > 5000) {
-            this_thread::sleep_for(chrono::milliseconds(50));
-            day++;
-        }
-        mtx.lock();
-        List.push_back(pass);
-        mtx.unlock();
-        return;
+bool isPassFile(const string PasswordFilePath) {
+    ifstream passfile(PasswordFilePath);
+    if (!passfile.is_open()) {
+        return false;
     }
-    for(char c : charList){
-        pass[cur_length] = c;
-        Generate(pass, cur_length +1);
-    }
-
+    passfile.close();
+    return true;
 }
 
-void Test(const char *zip_filename, const char *file_name_in_zip) {
+void passFromFile(const string PasswordFilePath){
+    ifstream passfile(PasswordFilePath);
+    string line;
+    while((!Found) && (getline(passfile, line))){
+        if(!line.empty()){
+            if(List.size() < 20000){
+                mtx.lock();
+                List.push_back(line);
+                mtx.unlock();
+            }
+            else {
+                cout << "So mat khau da thu " << Index << "\n";
+                this_thread::sleep_for(chrono::milliseconds(100));
+
+            }
+        }
+    }
+    while(!List.empty()){};
+    theEnd = true;
+    passfile.close();
+}
+
+void Test2(const char *zip_filename, const char *file_name) {
     int err = 0;
     zip_t *archive = zip_open(zip_filename, 0, &err);
-    if (!archive) {
-        cout << "Khong the mo file zip  " << err << "\n";
-        return;
-    }
-    string pass ;
+    string pass;
+    const char* password = pass.c_str();
     while(!Found){
         mtx.lock();
         if(!List.empty()){
             pass = List.front();
             List.pop_front();
-            tried++;
             mtx.unlock();
-        }
-        else{
-            het++;
-            mtx.unlock();
-            continue;
-        }
-            zip_file_t *file = zip_fopen_encrypted(archive, file_name_in_zip, 0, pass.c_str());
+            Index++;
+            zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
             if(file){
                 char buffer[1024];
                 int bytes_read = zip_fread(file, buffer, sizeof(buffer));
-                if (bytes_read > 0) {
+                if (bytes_read > 1023) {
                     cout << "Mat khau dung la " << pass << "\n";
                     Found = true;
                     zip_fclose(file);
@@ -74,7 +82,53 @@ void Test(const char *zip_filename, const char *file_name_in_zip) {
                 }
                 else {
                     zip_fclose(file);
-                    ErrPass.push(pass);
+                    Pass.push(pass);
+                }
+            }
+        }
+        else{
+            mtx.unlock();
+            if((theEnd)) {
+                return;
+            }
+            this_thread::sleep_for(chrono::milliseconds(50));
+        }
+    }
+    zip_close(archive);
+    return;
+}
+
+inline string Convert(long long tmp) {
+    string pass = "";
+    while(tmp > 0) {
+        pass = newCharList[tmp % sizeOfList] + pass;
+        tmp /= sizeOfList;
+    }
+    return pass;
+}
+
+void Test1(const char *zip_filename, const char *file_name) {
+    int err = 0;
+    long long tmp;
+    zip_t *archive = zip_open(zip_filename, 0, &err);
+    string pass;
+    const char* password = pass.c_str();
+    while((!Found) && (Index < total)){
+            long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
+            pass = Convert(tmp);
+            zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
+            if(file){
+                char buffer[4096];
+                int bytes_read = zip_fread(file, buffer, sizeof(buffer));
+                if (bytes_read > 4095) {
+                    mtx.lock();
+                    Pass.push(pass);
+                    mtx.unlock();
+                    zip_fclose(file);
+                }
+                else {
+                    zip_fclose(file);
+
                 }
             }
         }
@@ -82,138 +136,202 @@ void Test(const char *zip_filename, const char *file_name_in_zip) {
     return;
 }
 
+void TestAndProgress(const char *zip_filename, const char *file_name) {
+    int err = 0;
+    long long tmp;
+    zip_t *archive = zip_open(zip_filename, 0,0);
+    string pass;
+    const char* password = pass.c_str();
+    int time = 10000;
+    while((!Found) && (Index < total)){
+            long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
+            if(time == 0 ){
+                cout << Index << "\n";
+                time = 10000;
+            }
+            pass = Convert(tmp);
+            zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
+            if(file){
+                char buffer[4096];
+                int bytes_read = zip_fread(file, buffer, sizeof(buffer));
+                if (bytes_read > 4095) {
+                    mtx.lock();
+                    Pass.push(pass);
+                    mtx.unlock();
+                    zip_fclose(file);
+                }
+                else {
+                    zip_fclose(file);
+
+                }
+            }
+            time--;
+        }
+    zip_close(archive);
+    return;
+}
+
 void createCharList();
 
-void input(int &num_thread) {
-    string tmp;
-    bool flag;
-
-    cout << "Nhap vao so luong" << endl;
-    do {
-        cin >> tmp;
-        try {
-        num_thread = stoi(tmp);
-        flag = true;
-        }
-        catch (const invalid_argument&) {
-            cout << "Du lieu khong hop le. Vui long nhap lai (0-16): " << endl;
-            num_thread = -1;
-            flag = false;
-        }
-        catch (const out_of_range&) {
-            cout << "Gia tri qua lon. Vui long nhap lai (0-16): " << endl;
-            num_thread = -1;
-            flag = false;
-        }
-        if (((num_thread < 0) || (num_thread >16)) && (flag == true)) {
-            cout << "Gia tri qua lon. Vui long nhap lai (0-16): " << endl;
-        }
+void input(int argc, char* argv[]) {
+    zip_t *archive;
+    set<string> valid_flags = {"-b", "-l", "-d", "-u", "-f"};
+    if (argc == 1) {
+        cerr << "Usage: Giainen -b(-d) [flags(-l, -u, -n)] -f[filename]" << endl;
+        exit(1);
     }
-    while((num_thread < 0) || (num_thread >16));
-
-    cout << "Nhap vao so ky tu" << endl;
-    do {
-        cin >> tmp;
-        try {
-        length = stoi(tmp);
-        flag = true;
-        }
-        catch (const invalid_argument&) {
-            cout << "Du lieu khong hop le. Vui long nhap lai (0-6): " << endl;
-            length = -1;
-            flag = false;
-        }
-        catch (const out_of_range&) {
-            cout << "Gia tri qua lon. Vui long nhap lai (0-6): " << endl;
-            length = -1;
-            flag = false;
-        }
-        if (((length < 0) || (length >6)) && (flag == true)) {
-            cout << "Gia tri qua lon. Vui long nhap lai (0-6): " << endl;
-        }
-    }
-    while((num_thread < 0) || (num_thread >6));
-    createCharList();
-    return;
-}
-
-void createCharList(){
-    char tmp;
-    cout << "Nhap 1 de su dung bang chu cai thuong, mac dinh se su dung bang chu cai thuong" << endl;
-    cout << "Nhap 2 de su dung bang chu cai hoa" << endl;
-    cout << "Nhap 3 de su dung so" << endl;
-    cout << "Cac ki tu con lai co the nhap tu ban phim" << endl;
-    cout << "Nhap 0 de bat dau chay" << endl;
-    while(tmp != '0'){
-        cin >> tmp;
-        if(tmp == '1') {
+    for (int i = 1; i < argc; ++i) {
+        string flag = argv[i];
+        if (flag == "-b") {
+            choice = 1;
+        } else if (flag == "-d") {
+            choice = 2;
+        } else if (flag == "-l") {
             charList.insert(alphabet.begin(), alphabet.end());
-            continue;
-        }
-        if(tmp == '2') {
+        } else if (flag == "-u") {
             charList.insert(Alphabet.begin(), Alphabet.end());
-            continue;
+        } else if (flag == "-n") {
+            charList.insert(number.begin(), number.end());
+        } else if (flag == "-f" && i + 1 < argc) {
+            ZipFileDirectory = argv[++i];
+            zip_filename = ZipFileDirectory.c_str();
+            archive = zip_open(zip_filename, 0, 0);
+        } else {
+            cerr << "Unknown option: " << flag << endl;
         }
-        if(tmp == '3') {
-            charList.insert(number.begin(), Alphabet.end());
-            continue;
-        }
-        if(tmp != '0') charList.insert(tmp);
     }
+    for (char ch : charList) {
+        newCharList += ch;
+    }
+
+    if (choice == 0 || ZipFileDirectory.empty()) {
+        cerr << "Error: Missing required flags or filename." << endl;
+        exit(1);
+    }
+
+
+        filename = ZipFileDirectory;
+        zip_filename = ZipFileDirectory.c_str();
+        archive = zip_open(zip_filename, 0, 0);
+
+    zip_int64_t num_entries = zip_get_num_entries(archive, 0);
+    if (num_entries < 0) {
+        cout << "Khong the lay danh sach file trong ZIP Error " << num_entries << endl;
+        zip_close(archive);
+        return;
+    }
+
+    cout << "Danh sach cac file trong ZIP:" << endl;
+    for (zip_uint64_t i = 0; i < num_entries; i++) {
+        file_name = zip_get_name(archive, i, 0);
+        if (file_name) {
+            cout << i + 1 << ": " << file_name << endl;
+        } else {
+            cout << "Khong the lay ten file tai vi tri " << i << endl;
+        }
+    }
+    int tmp1;
+    cout << "Chon file trong ZIP bang cach nhap so thu tu: " << endl;
+    do {
+        cin >> tmp1;
+        if (tmp1 < 1 || tmp1 > num_entries) {
+            cout << "Lua chon khong hop le. Vui long nhap lai: ";
+        }
+    } while (tmp1 < 1 || tmp1 > num_entries);
+    filename = zip_get_name(archive, tmp1 - 1, 0);
+    file_name = filename.c_str();
+    cout << "Ban da chon file: " << file_name << endl;
+    zip_close(archive);
     return;
 }
 
-void progress_bar() {
-    long long total = pow(charList.size(),length);
-    int width = 100;
-    cout << "So mat khau can xu li: " << total <<endl;
-    cout << "Cac ky tu se su dung" << endl;
-    for(char c : charList){
-        cout << c << " ";
-    }
+
+void output(){
     cout << endl;
-    while(!Found && (tried!=total)){
-        cout << "\r[";
-        int pos = tried *width / total;
-        for (int j = 0; j < width; ++j) {
-            if (j < pos) cout << "=";
-            else if (j == pos) cout << ">";
-            else cout << "-";
-        }
-        cout << "] " << tried*100/total << "%" <<flush;
-        this_thread::sleep_for(chrono::milliseconds(200));
+    if(!Found) {
+        cout << "Khong tim thay mat khau dung" << endl;
+    }
+    cout << "Danh sach mat khau co the su dung: " << endl;
+    while (!Pass.empty()) {
+        cout << Pass.front() << endl;
+        Pass.pop();
     }
 
     cout << endl;
-    return;
 }
 
-int main(){
-    int num_thread;
-    vector<thread> testers;
-    input(num_thread);
-
-    string pass(length, ' ');
-    thread generator(Generate, ref(pass), 0);
-    for(int i=0; i < num_thread; i++){
-        testers.push_back(thread(Test, zip_filename, file_name_in_zip));
+void processbruteforce(){
+    total = pow(charList.size(),length);
+    sizeOfList = newCharList.size();
+    cout << "So pass can thu " << total << endl;
+    if(num_thread > 1){
+        for(int i=1; i < num_thread; i++){
+            testers.push_back(thread(Test1, zip_filename, file_name));
+        }
     }
-    progress_bar();
-
-    generator.join();
+    TestAndProgress(zip_filename, file_name);
     for (auto &t : testers) {
         t.join();
     }
+    return;
+}
 
-    cout << endl;
-    cout << "Danh sach mat khau gay loi CRC" << endl;
-    while (!ErrPass.empty()) {
-        cout << ErrPass.front() << endl;
-        ErrPass.pop();
+
+void processdictionary(){
+    total = 9223372036854775807;
+    cout << "Ban da chon su dung tu dien" << endl;
+    for(int i=1; i < num_thread; i++){
+        testers.push_back(thread(Test2, zip_filename, file_name));
     }
+    passFromFile(PasswordFilePath);
+    for (auto &t : testers) {
+        t.join();
+    }
+    return;
+}
 
-    cout << endl;
-    cout << "So lan het la " << het <<"\n";
-    cout << "So lan day la " << day <<"\n";
+void process() {
+    cout << zip_filename;
+    cout << ZipFileDirectory;
+    if(choice == 1) {
+        cout << "May ban hien co " << std::thread::hardware_concurrency() << " luong" << endl;
+        do {
+            cout << "Nhap so luong muon su dung: ";
+            cin >> num_thread;
+            if ((num_thread <= 0)||(num_thread >=16)) {
+                cout << "So luong luong phai lon hon 0. Vui long nhap lai." << endl;
+            }
+        }
+        while ((num_thread <= 0)||(num_thread >=16));
+        cout << "Nhap vao so ky tu" << endl;
+        do {
+            cin >> length;
+            if ((length < 0) || (length >6)) {
+                cout << "Gia tri qua lon. Vui long nhap lai (0-6): " << endl;
+            }
+        }
+        while((length < 0) || (length> 6));
+        processbruteforce();
+    }
+    else if(choice == 2) {
+        cout << "May ban hien co " << std::thread::hardware_concurrency() << " luong" << endl;
+        do {
+            cout << "Nhap so luong muon su dung: ";
+            cin >> num_thread;
+            if ((num_thread <= 0)||(num_thread >=16)) {
+                cout << "So luong luong phai lon hon 0. Vui long nhap lai." << endl;
+            }
+        }
+        while ((num_thread <= 0)||(num_thread >=16));
+        cout << "Nhap duong dan toi file tu dien"; fflush(stdin); getline(cin,PasswordFilePath);
+        processdictionary();
+    }
+    return;
+}
+
+int main(int argc, char* argv[]){
+    input(argc, argv);
+    process();
+    output();
     return 0;
 }
