@@ -2,12 +2,11 @@
 #include<thread>
 #include<zip.h>
 #include<zlib.h>
-// nhớ viết 2 hàm cho aes riêng và zipcrypto riêng, thêm cơ chế dừng và sửa lại GUI
+
 using namespace std;
 deque<string> List;
 atomic<bool> Found = false;         //Khóa kiểm tra khi tìm thấy kết quả
-atomic<long long> Index(0);        //Tính số pass đã thử
-queue<string> Pass;              //Queue chứa số mật khẩu gây lỗi
+atomic<long long> Index(0);         //Tính số pass đã thử
 set<char> charList= {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
 set<char> alphabet = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
 set<char> Alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
@@ -19,7 +18,7 @@ string ZipFileDirectory;
 string filename;
 const char *zip_filename;
 const char *file_name;
-int num_thread = thread::hardware_concurrency()/2;                     //Số luồng
+int num_thread = thread::hardware_concurrency()/2;                     //Số luồng, mặc định lấy 1 nửa luồng tối đa
 vector<thread> testers;             //Vector chứa luồng
 int choice = 0;
 string PasswordFilePath;
@@ -32,35 +31,31 @@ unsigned long correct_crc;
 inline string Convert(long long tmp);
 void signalHandler(int signum) {
     int tmp;
-    if (signum == SIGINT) {  // Khi nhận tín hiệu ngắt (Ctrl+C)
-        tmp = Index.exchange(total);  // Đánh dấu vị trí hiện tại trong Index
-
-        // Đọc toàn bộ nội dung của file progress.txt vào bộ nhớ
+    if (signum == SIGINT) {  //Ctrl+C
+        tmp = Index.exchange(total);
         ifstream inFile("D:/code/Project1/progress.txt");
         stringstream buffer;
         buffer << inFile.rdbuf();
         string fileContents = buffer.str();
         inFile.close();
 
-        // Tạo nội dung mới cần thay thế
-        string oldContent = ZipFileDirectory + "\n" + filename + "\n";  // Cặp tìm kiếm
-        string newContent = ZipFileDirectory + "\n" + filename + "\n" + to_string(tmp) + "\n";  // Cặp thay thế (với index mới)
 
-        // Tìm vị trí cặp cũ trong nội dung file
+        string oldContent = ZipFileDirectory + "\n" + filename + "\n";  //cũ
+        string newContent = ZipFileDirectory + "\n" + filename + "\n" + to_string(tmp) + "\n";  //mới
+
+        // Tìm và thay thế hoặc thêm
         size_t pos = fileContents.find(oldContent);
         if (pos != string::npos) {
-            // Thay thế cặp cũ bằng cặp mới
+
             fileContents.replace(pos + oldContent.length(), string::npos, to_string(tmp) + "\n");
         } else {
-            // Nếu không tìm thấy, thêm mới vào cuối file
             fileContents += newContent;
         }
 
-        // Ghi lại toàn bộ nội dung đã thay đổi vào file progress.txt
         ofstream outFile("D:/code/Project1/progress.txt", ios::trunc);
         if (outFile.is_open()) {
             outFile << fileContents;
-            outFile.close();  // Đóng file sau khi ghi
+            outFile.close();
 
             if (choice == 1) {
                 cout << endl;
@@ -73,7 +68,6 @@ void signalHandler(int signum) {
         } else {
             cerr << "Cannot open history" << endl;
         }
-
         this_thread::sleep_for(chrono::milliseconds(100));
         exit(0);
     }
@@ -84,7 +78,7 @@ bool checkProgressFile() {
     ifstream progressFile("D:/code/Project1/progress.txt", ios::in);
     if (!progressFile.is_open()) {
         cerr << "Cannot open history " << endl;
-        return false;  // Nếu không mở được file, trả về false
+        return false;
     }
     string zipFile, fileInZip;
     long long storedIndex;
@@ -167,18 +161,15 @@ void Test2(const char *zip_filename, const char *file_name) {
             zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
             if(file){
                 if (file) {
-                    // Đọc toàn bộ dữ liệu vào bộ đệm
-                    vector<char> buffer(4096);  // Bộ đệm tạm
+                    vector<char> buffer(4096);
                     string file_data = "";
                     int bytes_read;
                     while ((bytes_read = zip_fread(file, buffer.data(), buffer.size())) > 0) {
-                        file_data.append(buffer.data(), bytes_read);  // Lưu dữ liệu vào chuỗi
+                        file_data.append(buffer.data(), bytes_read);
                     }
 
-                    // Tính toán CRC sau khi đọc toàn bộ dữ liệu
                     unsigned long crc = calculate_crc(file_data.c_str(), file_data.size());
 
-                    // So sánh CRC với giá trị CRC mong đợi
                     if (crc == correct_crc) {
                         cout << "Right password: " << pass << "\n";
                         Found = true;
@@ -222,14 +213,12 @@ void Test1(const char *zip_filename, const char *file_name) {
             pass = Convert(tmp);
             zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
             if (file) {
-                // Đọc toàn bộ dữ liệu vào bộ đệm
-                vector<char> buffer(4096);  // Bộ đệm tạm
+                vector<char> buffer(4096);
                 string file_data = "";
                 int bytes_read;
                 while ((bytes_read = zip_fread(file, buffer.data(), buffer.size())) > 0) {
-                    file_data.append(buffer.data(), bytes_read);  // Lưu dữ liệu vào chuỗi
+                    file_data.append(buffer.data(), bytes_read);
                 }
-                // Kiểm tra nếu có dữ liệu đọc được
                 if (!file_data.empty()) {
                     unsigned long crc = calculate_crc(file_data.c_str(), file_data.size());
                     if (crc == correct_crc) {
@@ -237,7 +226,7 @@ void Test1(const char *zip_filename, const char *file_name) {
                         Found = true;
                         zip_fclose(file);
                         zip_close(archive);
-                        return;  // Mật khẩu đúng
+                        return;
                     }
                 }
                 zip_fclose(file);
@@ -267,7 +256,7 @@ void TestAndProgress(const char *zip_filename, const char *file_name) {
                 else if (j == pos) cout << ">";
                 else cout << " ";
             }
-            cout << "] " << Index * 100 / total << "% " << elapsed_time.count()<< flush;
+            cout << "] " << Index * 100 / total << "%  " << elapsed_time.count()<<"s"<< flush;
             time = 20000;
         }
         pass = Convert(tmp);
@@ -303,32 +292,28 @@ void instruction(){
 }
 
 void input(int argc, char* argv[]) {
-    num_thread = thread::hardware_concurrency() / 2;  // Số luồng mặc định là nửa số luồng của hệ thống
     zip_t *archive;
-    set<string> valid_flags = {"-b", "-l", "-d", "-u", "-t", "-l"};  // Thêm cờ "-l" cho độ dài mật khẩu
+    set<string> valid_flags = {"-b", "-l", "-d", "-u", "-t", "-l"};
 
     if (argc == 1) {
         instruction();  // Hiển thị hướng dẫn khi không có đối số
         exit(1);
     }
 
-    // Đường dẫn đến file ZIP sẽ là đối số đầu tiên (argv[1])
     ZipFileDirectory = argv[1];
     zip_filename = ZipFileDirectory.c_str();
     if(!isZipFile()){
         cerr << "Not a zip file" << endl;
         exit(1);
     }
-    // Kiểm tra các cờ dài cho chế độ bruteforce và dictionary
-    for (int i = 2; i < argc; ++i) {  // Bắt đầu từ chỉ số 2 vì argv[1] là đường dẫn file
-        string flag = argv[i];
 
+    for (int i = 2; i < argc; ++i) {
+        string flag = argv[i];
         // Kiểm tra các chế độ
         if (flag == "--bruteforce" || flag == "-b") {
-            choice = 1;  // Thiết lập chế độ bruteforce
-            // Kiểm tra nếu có số lượng ký tự mật khẩu (length) phía sau
+            choice = 1;
             if (i + 1 < argc && isdigit(argv[i + 1][0])) {
-                length = atoi(argv[++i]);  // Chuyển số ký tự mật khẩu thành kiểu int
+                length = atoi(argv[++i]);
                 if (length <= 0 || length > 6) {
                     cerr << "Length must be from 1 to 6" << endl;
                     exit(1);
@@ -338,11 +323,11 @@ void input(int argc, char* argv[]) {
                 exit(1);
             }
         } else if (flag == "--dictionary" || flag == "-d") {
-            choice = 2;  // Thiết lập chế độ dictionary
-            // Kiểm tra xem có nhập đúng đường dẫn đến file mật khẩu không
+            choice = 2;
+
             if (i + 1 < argc) {
-                PasswordFilePath = argv[++i];  // Lấy đường dẫn file mật khẩu
-                ifstream file(PasswordFilePath);  // Kiểm tra file có tồn tại không
+                PasswordFilePath = argv[++i];
+                ifstream file(PasswordFilePath);
                 if (!file) {
                     cerr << "Cannot open passwords file " << PasswordFilePath << endl;
                     exit(1);
@@ -356,30 +341,28 @@ void input(int argc, char* argv[]) {
                 exit(1);
             }
         } else if (flag == "-l") {
-            charList.insert(alphabet.begin(), alphabet.end());  // Thêm ký tự từ alphabet vào charList
+            charList.insert(alphabet.begin(), alphabet.end());
         } else if (flag == "-u") {
-            charList.insert(Alphabet.begin(), Alphabet.end());  // Thêm ký tự từ Alphabet vào charList
+            charList.insert(Alphabet.begin(), Alphabet.end());
         } else if (flag == "-n") {
-            charList.insert(number.begin(), number.end());  // Thêm ký tự từ number vào charList
+            charList.insert(number.begin(), number.end());
         } else if (flag == "-t" && i + 1 < argc) {
-            num_thread = atoi(argv[++i]);  // Đọc số luồng từ tham số tiếp theo
+            num_thread = atoi(argv[++i]);
             if (num_thread <= 0 || num_thread >= thread::hardware_concurrency()) {
                 cerr << "Thread must be from 1 to "<< thread::hardware_concurrency() << endl;
                 exit(1);
             }
         } else {
-            cerr << "Unknown option: " << flag << endl;  // Thông báo lỗi nếu gặp cờ không hợp lệ
+            cerr << "Unknown option: " << flag << endl;
         }
     }
 
-    // Ghép lại tất cả các ký tự trong charList thành newCharList
     for (char ch : charList) {
         newCharList += ch;
     }
 
-    // Kiểm tra nếu không có chế độ nào được chọn hoặc đường dẫn zip không hợp lệ
     if (choice == 0 || ZipFileDirectory.empty()) {
-        cerr << "Chưa nhập cách thức" << endl;
+        cerr << "No method or directory found" << endl;
         exit(1);
     }
 
@@ -387,23 +370,21 @@ void input(int argc, char* argv[]) {
 
     zip_int64_t num_entries = zip_get_num_entries(archive, 0);
     if (num_entries < 0) {
-        cout << "Không thể lấy danh sách file trong ZIP. Error " << num_entries << endl;
+        cout << "Cannot find file in archive. Error " << num_entries << endl;
         zip_close(archive);
         exit(1);
     }
 
-    // Hiển thị danh sách các file trong ZIP
-    cout << "Danh sách các file trong ZIP:" << endl;
+    cout << "Number of file in archive:" << endl;
     for (zip_uint64_t i = 0; i < num_entries; i++) {
         file_name = zip_get_name(archive, i, 0);
         if (file_name) {
             cout << i + 1 << ": " << file_name << endl;
         } else {
-            cout << "Không thể lấy tên file tại vị trí " << i << endl;
+            cout << "Cannot found file index " << i << endl;
         }
     }
 
-    // Chọn file trong ZIP
     int tmp1;
     cout << "Pick a file " << endl;
     do {
@@ -426,12 +407,11 @@ void input(int argc, char* argv[]) {
     if (choice == 1) {
         cout << "Bruteforce Mode" << endl;
         cout << "Number of character " << length << endl;
-        cout << "Character using " << newCharList << endl;
+        cout << "Character in use: " << newCharList << endl;
     } else if (choice == 2) {
         cout << "Dictionary Mode" << endl;
         cout << "Password file path " << PasswordFilePath << endl;
     }
-    // In ra số luồng đã chọn
     cout << "Number of threads " << num_thread << endl;
 
     return;
@@ -476,7 +456,7 @@ void processdictionary(){
 void process() {
     if(choice == 1) {
         if(checkProgressFile()) {
-            cout << "You have tried " << tmpIndex << "passwords before, Y to continue, other to restart" << endl;
+            cout << "You have tried " << tmpIndex << " passwords before, Y to continue, other to restart" << endl;
             char tmp;
             cin >> tmp;
             if(tmp == 'Y'){
