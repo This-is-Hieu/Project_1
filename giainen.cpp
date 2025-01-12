@@ -135,7 +135,7 @@ void passFromFile(const string PasswordFilePath){
                 mtx.unlock();
             }
             else {
-                cout << "Tried password " << Index << "\n";
+                cout << "\rTried password " << Index << flush;
                 this_thread::sleep_for(chrono::milliseconds(100));
 
             }
