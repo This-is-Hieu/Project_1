@@ -6,14 +6,13 @@
 using namespace std;
 deque<string> List;
 atomic<bool> Found = false;         //Khóa kiểm tra khi tìm thấy kết quả
-atomic<long long> Index(0);         //Tính số pass đã thử
+atomic<unsigned long long> Index(0);         //Tính số pass đã thử
 set<char> charList= {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
-set<char> alphabet = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
 set<char> Alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
 set<char> number = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
 string newCharList;
 int length = 0;                     //Số kí tự trong mật khẩu
-long long total;                    //Tổng số mật khẩu cần thử
+unsigned long long total;                    //Tổng số mật khẩu cần thử
 string ZipFileDirectory;
 string filename;
 const char *zip_filename;
@@ -28,7 +27,7 @@ bool theEnd = false;
 unsigned long correct_crc;
 
 // Hàm xử lý tín hiệu ngắt và ghi vào file
-inline string Convert(long long tmp);
+inline string Convert(unsigned long long tmp);
 void signalHandler(int signum) {
     int tmp;
     if (signum == SIGINT) {  //Ctrl+C
@@ -73,7 +72,7 @@ void signalHandler(int signum) {
     }
 }
 
-long long tmpIndex;
+unsigned long long tmpIndex;
 bool checkProgressFile() {
     ifstream progressFile("D:/code/Project1/progress.txt", ios::in);
     if (!progressFile.is_open()) {
@@ -81,7 +80,7 @@ bool checkProgressFile() {
         return false;
     }
     string zipFile, fileInZip;
-    long long storedIndex;
+    unsigned long long storedIndex;
     while (getline(progressFile, zipFile)) {
         getline(progressFile, fileInZip);
         progressFile >> storedIndex;
@@ -193,7 +192,7 @@ void Test2(const char *zip_filename, const char *file_name) {
     return;
 }
 
-inline string Convert(long long tmp) {
+inline string Convert(unsigned long long tmp) {
     string pass = "";
     while(tmp > 0) {
         pass = newCharList[tmp % sizeOfList] + pass;
@@ -204,13 +203,14 @@ inline string Convert(long long tmp) {
 
 void Test1(const char *zip_filename, const char *file_name) {
     int err = 0;
-    long long tmp;
+    unsigned long long tmp;
     zip_t *archive = zip_open(zip_filename, ZIP_RDONLY, &err);
     string pass;
     const char* password = pass.c_str();
     while((!Found) && (Index < total)){
-            long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
+            unsigned long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
             pass = Convert(tmp);
+            pass = "1234";
             zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
             if (file) {
                 vector<char> buffer(4096);
@@ -242,12 +242,15 @@ void TestAndProgress(const char *zip_filename, const char *file_name) {
     string pass;
     const char* password = pass.c_str();
     auto start_time = chrono::high_resolution_clock::now();  // Lưu thời gian bắt đầu
-    int time = 200;
+
     while ((!Found) && (Index < total)) {
         long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
-            auto current_time = chrono::high_resolution_clock::now();
-            chrono::duration<double> elapsed_time = current_time - start_time;
-        if (time == 0) {
+
+        auto current_time = chrono::high_resolution_clock::now();
+        chrono::duration<double> elapsed_time = current_time - start_time;
+
+        // Kiểm tra nếu đã qua 1 giây
+        if (elapsed_time.count() >= 1.0) {
             int width = 100;
             cout << "\r["; // Quay lại đầu dòng
             int pos = Index * width / total;
@@ -256,9 +259,12 @@ void TestAndProgress(const char *zip_filename, const char *file_name) {
                 else if (j == pos) cout << ">";
                 else cout << " ";
             }
-            cout << "] " << Index * 100 / total << "%  " << elapsed_time.count()<<"s"<< flush;
-            time = 20000;
+            cout << "] " << Index * 100 / total << "%  " << elapsed_time.count() << flush;
+
+            // Cập nhật thời gian bắt đầu mỗi 1 giây
+            start_time = chrono::high_resolution_clock::now();
         }
+
         pass = Convert(tmp);
         zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
         if (file) {
@@ -280,15 +286,25 @@ void TestAndProgress(const char *zip_filename, const char *file_name) {
             }
             zip_fclose(file);
         }
-        time--;
     }
     zip_close(archive);
 }
 
+
 void instruction(){
-    cout << "Giainen -b de bruteforce, -d de su dung tu dien" << endl;
-    cout << "Khi su dung brute force, them -l de them chu thuong, -u de them in hoa, -n de them so" << endl;
-    cout << "-f duong dan file zip can giai nen" << endl;
+    cout << "Giainen" << endl;
+    cout << "Usage:giainen zipfilepath --bruteforce threaduse" << endl;
+    cout << "or giainen zipfilepath --dictionary passwordsfilepath"<< endl;
+    cout << endl;
+    cout << "Modifier" << endl;
+    cout << "-t <num_thread>\tNumber of threads used (default: "<< thread::hardware_concurrency()/2 << ")"<< endl;
+    cout << "-l\t\tRemoving lowercase characters from characters set" << endl;
+    cout << "-n\t\tAdding number to characters set" << endl;
+    cout << "-u\t\tAdding uppercase characters from characters set" << endl;
+    cout << "Default character set is set to lowercase character(a-z)" << endl;
+    cout << endl;
+    cout << "Example:" << endl;
+    cout << " giainen file.zip --bruteforce 4" << endl;
 }
 
 void input(int argc, char* argv[]) {
@@ -324,7 +340,6 @@ void input(int argc, char* argv[]) {
             }
         } else if (flag == "--dictionary" || flag == "-d") {
             choice = 2;
-
             if (i + 1 < argc) {
                 PasswordFilePath = argv[++i];
                 ifstream file(PasswordFilePath);
@@ -341,15 +356,22 @@ void input(int argc, char* argv[]) {
                 exit(1);
             }
         } else if (flag == "-l") {
-            charList.insert(alphabet.begin(), alphabet.end());
+            // Xóa các ký tự chữ thường khỏi charList
+            for (auto it = charList.begin(); it != charList.end(); ) {
+                if (islower(*it)) {
+                    it = charList.erase(it);  // Xóa ký tự nếu là chữ thường
+                } else {
+                    ++it;  // Tiến tới ký tự tiếp theo
+                }
+            }
         } else if (flag == "-u") {
             charList.insert(Alphabet.begin(), Alphabet.end());
         } else if (flag == "-n") {
             charList.insert(number.begin(), number.end());
         } else if (flag == "-t" && i + 1 < argc) {
             num_thread = atoi(argv[++i]);
-            if (num_thread <= 0 || num_thread >= thread::hardware_concurrency()) {
-                cerr << "Thread must be from 1 to "<< thread::hardware_concurrency() << endl;
+            if (num_thread <= 0 || num_thread > thread::hardware_concurrency()) {
+                cerr << "Thread must be from 1 to " << thread::hardware_concurrency() << endl;
                 exit(1);
             }
         } else {
@@ -402,7 +424,6 @@ void input(int argc, char* argv[]) {
     zip_stat(archive, file_name, 0, &stat);  // Lấy thông tin file
     correct_crc = stat.crc;  // Lấy CRC từ thông tin file
     zip_close(archive);
-
 
     if (choice == 1) {
         cout << "Bruteforce Mode" << endl;
