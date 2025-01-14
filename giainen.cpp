@@ -2,10 +2,10 @@
 #include<thread>
 #include<zip.h>
 #include<zlib.h>
-
+#include<windows.h>
 using namespace std;
 deque<string> List;
-atomic<bool> Found = false;         //Khóa kiểm tra khi tìm thấy kết quả
+atomic<bool> Found(false);         //Khóa kiểm tra khi tìm thấy kết quả
 atomic<unsigned long long> Index(0);         //Tính số pass đã thử
 set<char> charList= {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
 set<char> Alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
@@ -25,9 +25,17 @@ int sizeOfList = 0;
 mutex mtx;
 bool theEnd = false;
 unsigned long correct_crc;
+int file_index = 0;
+
+void Convert(unsigned long long tmp, string& pass) {
+    pass.clear();
+    while (tmp > 0) {
+        pass = newCharList[tmp % sizeOfList] + pass;
+        tmp /= sizeOfList;
+    }
+}
 
 // Hàm xử lý tín hiệu ngắt và ghi vào file
-inline string Convert(unsigned long long tmp);
 void signalHandler(int signum) {
     int tmp;
     if (signum == SIGINT) {  //Ctrl+C
@@ -55,10 +63,10 @@ void signalHandler(int signum) {
         if (outFile.is_open()) {
             outFile << fileContents;
             outFile.close();
-
+            string temp;
             if (choice == 1) {
                 cout << endl;
-                cerr << "Current password: " << Convert(tmp) << endl;
+                cerr << "Current password: " << temp << endl;
             }
 
             if (choice == 2) {
@@ -145,7 +153,8 @@ void passFromFile(const string PasswordFilePath){
     passfile.close();
 }
 
-void Test2(const char *zip_filename, const char *file_name) {
+void Test2(const char *zip_filename) {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     int err = 0;
     zip_t *archive = zip_open(zip_filename, 0, &err);
     string pass;
@@ -157,16 +166,15 @@ void Test2(const char *zip_filename, const char *file_name) {
             List.pop_front();
             mtx.unlock();
             Index++;
-            zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
+            zip_file_t *file = zip_fopen_index_encrypted(archive,file_index, 0, password);
             if(file){
                 if (file) {
-                    vector<char> buffer(4096);
+                    char buffer[4096];
                     string file_data = "";
                     int bytes_read;
-                    while ((bytes_read = zip_fread(file, buffer.data(), buffer.size())) > 0) {
-                        file_data.append(buffer.data(), bytes_read);
+                    while ((bytes_read = zip_fread(file, buffer, 4096)) > 0) {
+                        file_data.append(buffer, buffer + bytes_read);
                     }
-
                     unsigned long crc = calculate_crc(file_data.c_str(), file_data.size());
 
                     if (crc == correct_crc) {
@@ -192,87 +200,92 @@ void Test2(const char *zip_filename, const char *file_name) {
     return;
 }
 
-inline string Convert(unsigned long long tmp) {
-    string pass = "";
-    while(tmp > 0) {
-        pass = newCharList[tmp % sizeOfList] + pass;
-        tmp /= sizeOfList;
-    }
-    return pass;
-}
 
-void Test1(const char *zip_filename, const char *file_name) {
+
+void Test1(const char *zip_filename) {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
     int err = 0;
-    unsigned long long tmp;
     zip_t *archive = zip_open(zip_filename, ZIP_RDONLY, &err);
+    if (!archive) {
+        cerr << "Failed to open zip archive.\n";
+        return;
+    }
+
     string pass;
     const char* password = pass.c_str();
-    while((!Found) && (Index < total)){
-            unsigned long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
-            pass = Convert(tmp);
-            pass = "1234";
-            zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
-            if (file) {
-                vector<char> buffer(4096);
-                string file_data = "";
-                int bytes_read;
-                while ((bytes_read = zip_fread(file, buffer.data(), buffer.size())) > 0) {
-                    file_data.append(buffer.data(), bytes_read);
-                }
-                if (!file_data.empty()) {
-                    unsigned long crc = calculate_crc(file_data.c_str(), file_data.size());
-                    if (crc == correct_crc) {
-                        cout << "\nRight password: " << pass << "\n";
-                        Found = true;
-                        zip_fclose(file);
-                        zip_close(archive);
-                        return;
-                    }
-                }
-                zip_fclose(file);
+    char buffer[8192];
+
+    while (!Found && (Index < total)) {
+        unsigned long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
+        Convert(tmp, pass);
+        password = pass.c_str();
+
+        zip_file_t *file = zip_fopen_index_encrypted(archive, file_index, 0, password);
+        if (file) {
+            string file_data;
+            int bytes_read;
+            while ((bytes_read = zip_fread(file, buffer, sizeof(buffer))) > 0) {
+                file_data.append(buffer, bytes_read);
             }
+            if (!file_data.empty()) {
+                unsigned long crc = calculate_crc(file_data.c_str(), file_data.size());
+                if (crc == correct_crc) {
+                    cout << "\nRight password: " << pass << "\n";
+                    Found = true;
+                    zip_fclose(file);
+                    zip_close(archive);
+                    return;
+                }
+            }
+            zip_fclose(file);
         }
+    }
+
     zip_close(archive);
-    return;
 }
 
-void TestAndProgress(const char *zip_filename, const char *file_name) {
+
+
+void TestAndProgress(const char *zip_filename) {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     int err = 0;
     zip_t *archive = zip_open(zip_filename, 0, 0);
     string pass;
     const char* password = pass.c_str();
-    auto start_time = chrono::high_resolution_clock::now();  // Lưu thời gian bắt đầu
+    auto start_time = chrono::steady_clock::now();  // Store the start time
+    int seconds_elapsed = 0;  // Variable to track elapsed time
 
     while ((!Found) && (Index < total)) {
         long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
 
-        auto current_time = chrono::high_resolution_clock::now();
-        chrono::duration<double> elapsed_time = current_time - start_time;
+        auto current_time = chrono::steady_clock::now();
+        chrono::duration<float> elapsed_time = current_time - start_time;
 
-        // Kiểm tra nếu đã qua 1 giây
-        if (elapsed_time.count() >= 1.0) {
+        // Update progress bar every second
+        if (elapsed_time.count() >= (seconds_elapsed + 1)) {
             int width = 100;
-            cout << "\r["; // Quay lại đầu dòng
+            cout << "\r[";  // Return to the start of the line
             int pos = Index * width / total;
             for (int j = 0; j < width; ++j) {
                 if (j < pos) cout << "=";
                 else if (j == pos) cout << ">";
                 else cout << " ";
             }
-            cout << "] " << Index * 100 / total << "%  " << elapsed_time.count() << flush;
+            cout << "] " << Index * 100 / total << "%  " << (int)elapsed_time.count() << "s" << flush;
 
-            // Cập nhật thời gian bắt đầu mỗi 1 giây
-            start_time = chrono::high_resolution_clock::now();
+            // Update seconds_elapsed to reflect the current time
+            seconds_elapsed = static_cast<int>(elapsed_time.count());
         }
 
-        pass = Convert(tmp);
-        zip_file_t *file = zip_fopen_encrypted(archive, file_name, 0, password);
+        Convert(tmp, pass);
+        zip_file_t *file = zip_fopen_index_encrypted(archive, file_index, ZIP_RDONLY, password);
         if (file) {
-            vector<char> buffer(4096);
+            char buffer[4096];
             string file_data = "";
             int bytes_read;
-            while ((bytes_read = zip_fread(file, buffer.data(), buffer.size())) > 0) {
-                file_data.append(buffer.data(), bytes_read);
+            while ((bytes_read = zip_fread(file, buffer, 4096)) > 0) {
+                file_data.append(buffer, buffer + bytes_read);
             }
             if (!file_data.empty()) {
                 unsigned long crc = calculate_crc(file_data.c_str(), file_data.size());
@@ -289,6 +302,8 @@ void TestAndProgress(const char *zip_filename, const char *file_name) {
     }
     zip_close(archive);
 }
+
+
 
 
 void instruction(){
@@ -415,7 +430,7 @@ void input(int argc, char* argv[]) {
             cout << "Invalid ";
         }
     } while (tmp1 < 1 || tmp1 > num_entries);
-
+    file_index = tmp1 - 1;
     filename = zip_get_name(archive, tmp1 - 1, 0);
     file_name = filename.c_str();
     cout << "File using " << file_name << endl;
@@ -452,10 +467,10 @@ void processbruteforce(){
     cout << "Total passwords " << total << endl;
     if(num_thread > 1){
         for(int i=1; i < num_thread; i++){
-            testers.push_back(thread(Test1, zip_filename, file_name));
+            testers.push_back(thread(Test1, zip_filename));
         }
     }
-    TestAndProgress(zip_filename, file_name);
+    TestAndProgress(zip_filename);
     for (auto &t : testers) {
         t.join();
     }
@@ -465,7 +480,7 @@ void processbruteforce(){
 void processdictionary(){
     total = 9223372036854775807;
     for(int i=1; i < num_thread; i++){
-        testers.push_back(thread(Test2, zip_filename, file_name));
+        testers.push_back(thread(Test2, zip_filename));
     }
     passFromFile(PasswordFilePath);
     for (auto &t : testers) {
