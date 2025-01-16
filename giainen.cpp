@@ -178,7 +178,7 @@ void Test2(const char *zip_filename) {
                     unsigned long crc = calculate_crc(file_data.c_str(), file_data.size());
 
                     if (crc == correct_crc) {
-                        cout << "Right password: " << pass << "\n";
+                        cout << "\nRight password: " << pass << "\n";
                         Found = true;
                         zip_fclose(file);
                         zip_close(archive);
@@ -204,28 +204,19 @@ void Test2(const char *zip_filename) {
 
 void Test1(const char *zip_filename) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-
-    int err = 0;
-    zip_t *archive = zip_open(zip_filename, ZIP_RDONLY, &err);
-    if (!archive) {
-        cerr << "Failed to open zip archive.\n";
-        return;
-    }
-
+    zip_t *archive = zip_open(zip_filename, 0, 0);
     string pass;
     const char* password = pass.c_str();
-    char buffer[8192];
-
+    char buffer[4096];
     while (!Found && (Index < total)) {
         unsigned long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
         Convert(tmp, pass);
-        password = pass.c_str();
 
         zip_file_t *file = zip_fopen_index_encrypted(archive, file_index, 0, password);
         if (file) {
             string file_data;
             int bytes_read;
-            while ((bytes_read = zip_fread(file, buffer, sizeof(buffer))) > 0) {
+            while ((bytes_read = zip_fread(file, buffer, 4096)) > 0) {
                 file_data.append(buffer, bytes_read);
             }
             if (!file_data.empty()) {
@@ -249,7 +240,6 @@ void Test1(const char *zip_filename) {
 
 void TestAndProgress(const char *zip_filename) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-    int err = 0;
     zip_t *archive = zip_open(zip_filename, 0, 0);
     string pass;
     const char* password = pass.c_str();
@@ -257,7 +247,7 @@ void TestAndProgress(const char *zip_filename) {
     int seconds_elapsed = 0;  // Variable to track elapsed time
 
     while ((!Found) && (Index < total)) {
-        long long tmp = Index.fetch_add(1, std::memory_order_relaxed);
+        unsigned long long tmp = Index.fetch_add(1, memory_order_relaxed);
 
         auto current_time = chrono::steady_clock::now();
         chrono::duration<float> elapsed_time = current_time - start_time;
